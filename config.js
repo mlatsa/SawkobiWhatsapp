@@ -7,7 +7,7 @@
 module.exports = {
   // Your timezone, used to work out "business hours". Find yours at
   // https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
-  timezone: 'Europe/Rome',
+  timezone: 'Asia/Tbilisi',
 
   // Your opening hours, in 24-hour format. Set a day to `null` if you're
   // closed all day (see "sat" and "sun" below).
@@ -58,14 +58,28 @@ module.exports = {
 
   // Sent when the message doesn't match any FAQ above AND it's a WEEKDAY
   // but outside the hours set above (e.g. a Tuesday night).
-  awayMessage:
-    "Thanks for reaching out! We're currently outside business hours (Mon–Fri, 9am–6pm). We'll reply as soon as we're back. 🙏",
+  awayMessage: `გამარჯობა! 👋
+
+მადლობა, რომ მოგვწერეთ.
+
+როგორც ჩანს, ჩვენი სამუშაო დღე უკვე დასრულებულია, ამიტომ ახლა ჩვენი გუნდიც ისვენებს 😊
+
+დილით თქვენს შეტყობინებას აუცილებლად წავიკითხავთ. თუ მოგვწერთ, რომელ საათზე იქნება თქვენთვის მოსახერხებელი საუბარი, სწორედ იმ დროს დაგიკავშირდებით.
+
+წინასწარ მადლობა და სასიამოვნო საღამოს გისურვებთ❤️`,
 
   // Sent when the message doesn't match any FAQ above AND it's a WEEKEND
   // day (Saturday or Sunday) - sent any time during the weekend, since
   // weekends are closed all day in businessHours above.
-  weekendMessage:
-    "Thanks for messaging us! We're closed for the weekend and will be back Monday morning. We'll get back to you then. 🙏",
+  weekendMessage: `გამარჯობა! 👋
+
+მადლობა, რომ მოგვწერეთ.
+
+დღეს ჩვენი გუნდის დასვენების დღეა, ამიტომ პასუხს ორშაბათს, სამუშაო საათებში დაგიბრუნებთ 😊
+
+თუ მოგვწერთ, რომელ საათზე იქნება თქვენთვის მოსახერხებელი საუბარი, სწორედ იმ დროს დაგიკავშირდებით.
+
+გმადლობთ გაგებისთვის! ❤️ სასიამოვნო დასვენების დღეს გისურვებთ!`,
 
   // Which weekday keys (from businessHours above) count as "the weekend"
   // for picking weekendMessage instead of awayMessage. Matches sat/sun by
