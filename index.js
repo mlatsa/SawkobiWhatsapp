@@ -208,11 +208,23 @@ async function startBot() {
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const loggedOut = statusCode === DisconnectReason.loggedOut;
+      const wasRegistered = sock.authState.creds.registered;
+
       if (loggedOut) {
         console.log(
-          '❌ Logged out from WhatsApp. Delete the auth_info_baileys folder and restart to link again.'
+          '❌ Logged out from WhatsApp. Redeploy (or restart) the service for a clean session and a fresh pairing code.'
+        );
+      } else if (!wasRegistered) {
+        // Disconnected before pairing finished (code expired/unused, etc).
+        // Do NOT auto-retry here - repeatedly requesting new pairing codes
+        // in a tight loop is what can get the session flagged. Redeploying
+        // gives a clean slate and a fresh code instead.
+        console.log(
+          '⚠️  Disconnected before pairing finished (the code probably wasn\'t entered in time). ' +
+            'Redeploy (or restart) the service to get a fresh pairing code, then enter it right away.'
         );
       } else {
+        // Was already linked and working - this is a normal drop, safe to reconnect.
         console.log('⚠️  Connection closed, reconnecting in 3 seconds...');
         setTimeout(startBot, 3000);
       }
