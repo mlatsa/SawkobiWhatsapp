@@ -1,0 +1,16 @@
+{
+  "name": "whatsapp-afterhours-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Official WhatsApp Cloud API webhook bot - replies to clients outside business hours.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
