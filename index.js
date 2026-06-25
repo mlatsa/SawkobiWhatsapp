@@ -170,6 +170,9 @@ async function handleMessage(sock, msg) {
 }
 
 // ---- Connect to WhatsApp ----------------------------------------------------
+let hasEverFullyConnected = false; // only set true by a real 'open' event - not by creds.registered
+let pairingCodeRequested = false; // only request a pairing code ONCE per process - never auto-retry it
+
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
 
@@ -189,7 +192,13 @@ async function startBot() {
       qrcodeTerminal.generate(qr, { small: true });
     }
 
-    if (PAIRING_PHONE_NUMBER && connection === 'connecting' && !sock.authState.creds.registered) {
+    if (
+      PAIRING_PHONE_NUMBER &&
+      connection === 'connecting' &&
+      !sock.authState.creds.registered &&
+      !pairingCodeRequested
+    ) {
+      pairingCodeRequested = true; // never ask twice in the same process, even on reconnect
       try {
         await delay(1500);
         const code = await sock.requestPairingCode(PAIRING_PHONE_NUMBER);
@@ -202,29 +211,28 @@ async function startBot() {
     }
 
     if (connection === 'open') {
+      hasEverFullyConnected = true;
       console.log('✅ Connected to WhatsApp. The bot is now live.');
     }
 
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const loggedOut = statusCode === DisconnectReason.loggedOut;
-      const wasRegistered = sock.authState.creds.registered;
 
       if (loggedOut) {
         console.log(
           '❌ Logged out from WhatsApp. Redeploy (or restart) the service for a clean session and a fresh pairing code.'
         );
-      } else if (!wasRegistered) {
-        // Disconnected before pairing finished (code expired/unused, etc).
-        // Do NOT auto-retry here - repeatedly requesting new pairing codes
-        // in a tight loop is what can get the session flagged. Redeploying
-        // gives a clean slate and a fresh code instead.
+      } else if (!hasEverFullyConnected) {
+        // Never actually finished linking in THIS process. Do not auto-retry -
+        // requesting a second pairing code before the first is used is what
+        // gets the session flagged. A fresh redeploy is required for a new code.
         console.log(
-          '⚠️  Disconnected before pairing finished (the code probably wasn\'t entered in time). ' +
-            'Redeploy (or restart) the service to get a fresh pairing code, then enter it right away.'
+          '⚠️  Disconnected before linking finished. Redeploy (or restart) the service for a fresh pairing code, ' +
+            'and have WhatsApp open and ready before you do.'
         );
       } else {
-        // Was already linked and working - this is a normal drop, safe to reconnect.
+        // Was already linked and working before - this is a normal drop, safe to reconnect.
         console.log('⚠️  Connection closed, reconnecting in 3 seconds...');
         setTimeout(startBot, 3000);
       }
