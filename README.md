@@ -1,95 +1,129 @@
-# WhatsApp After-Hours Bot (Official Cloud API)
+# WhatsApp Auto-Reply Bot (free, no official API)
 
-Replies automatically ONLY when someone messages you outside business
-hours. During business hours it stays silent so your team can answer
-personally. (You can optionally add instant FAQ answers later in
-`config.js` — see the comments in that file.)
+A simple bot that replies to your clients automatically: FAQ answers,
+business-hours awareness, and an away message. It connects to WhatsApp the
+same way "WhatsApp Web" does — no Meta Business account, no API approval,
+no credit card, ever.
 
-This uses Meta's official Cloud API — no ban risk, no QR codes — but it
-does require the payment method on the WhatsApp Business Account that we
-talked about, and a tiny bit more setup than the WhatsApp-Web version.
-
----
-
-## You need 4 values before this works
-
-| Value | Where to find it |
-|---|---|
-| `PHONE_NUMBER_ID` | App dashboard → **Step 1. Try it out** (API Setup) |
-| `WHATSAPP_TOKEN` | Same screen — "Temporary access token" (fine for testing; swap for a permanent System User token later) |
-| `VERIFY_TOKEN` | **You make this up.** Any string, e.g. `sawkobi-secret-2026`. You'll type the exact same thing into the Meta dashboard. |
-| A public HTTPS URL for this code | See Part A or B below |
+**Edit `config.js` to change what it says.** Everything else in this folder
+you can mostly leave alone.
 
 ---
 
-## Part A — Test it live in the next 10 minutes (on your laptop, via ngrok)
+## ⚠️ Please read before you start
 
-This is the fastest way to see it actually working today, before you set
-up permanent hosting.
+This connects using **Baileys**, a community library that talks to WhatsApp
+the same way the official WhatsApp Web site does. It is not the official
+API, and using it technically goes against WhatsApp's Terms of Service.
+In practice:
 
-1. Install dependencies and run it locally:
-   ```bash
-   npm install
-   WHATSAPP_TOKEN=your_token PHONE_NUMBER_ID=your_id VERIFY_TOKEN=sawkobi-secret-2026 npm start
-   ```
-2. In a **second terminal**, install and run [ngrok](https://ngrok.com)
-   (free, no card needed for this):
-   ```bash
-   ngrok http 3000
-   ```
-   It'll print something like `https://abc123.ngrok-free.app` — that's
-   your public URL, free and stable for as long as you keep it running.
-3. Back on the **"Configure Webhooks"** page you're on right now:
-   - **Callback URL:** `https://abc123.ngrok-free.app/webhook` (your ngrok URL + `/webhook`)
-   - **Verify token:** `sawkobi-secret-2026` (must match exactly what you used above)
-   - Click **Verify and save**. You should see `✅ Webhook verified by Meta.` in your terminal.
-4. There's usually a **"Manage"** link or a field list right after saving —
-   make sure **`messages`** is subscribed/checked. That's the event type
-   that tells your bot when someone texts you.
-5. Send a WhatsApp message to your test number from your own phone (the
-   number you added as a test recipient back in Step 1).
+- For a low-volume bot just replying to people who message *you* first,
+  the risk is real but lower than for cold outreach or bulk messaging.
+- There is no guaranteed-safe setting. Numbers occasionally get
+  temporarily or permanently restricted, sometimes for no obvious reason.
+- **Don't use your only personal number if losing WhatsApp access for a
+  while would be a real problem.** A secondary SIM/number is safer if you
+  can get one.
+- Never use this to message people who haven't messaged you, or to send
+  bulk/marketing messages — that's the behavior most likely to get flagged.
 
-**If nothing happens:** the banner on your screen says real messages won't
-reach the webhook while the app is **Unpublished**. If step 5 doesn't
-trigger anything in your terminal, go to **Publish** in the left sidebar
-and publish the app — your earlier checklist looked complete, so this
-should just be a click, not a review wait. Then try sending the message again.
-
-To actually see the after-hours reply fire on demand, temporarily edit
-`config.js` and set today's day to `null` (closed), save, restart `npm
-start`, send a message, then change it back.
+If that risk isn't acceptable for your business, the alternative is Meta's
+official WhatsApp Business API — but note it requires adding a card to
+your Meta Business account before you can use a real phone number, even
+though replies to clients who message first are free.
 
 ---
 
-## Part B — Make it permanent (free, not on your device)
+## 1. Run it locally first (to make sure it works)
 
-Once Part A proves the logic works, move it off your laptop:
+You'll need [Node.js](https://nodejs.org) 18 or newer installed.
 
-1. Push this folder to a free host that doesn't sleep on inbound HTTP
-   the way ours needs — **Render** is the easiest free, no-card option:
-   - Create a free account at render.com
-   - New → Web Service → connect this code (via a GitHub repo, or Render's manual upload)
-   - Build command: `npm install` — Start command: `npm start`
-   - Add the same 3 environment variables (`WHATSAPP_TOKEN`,
-     `PHONE_NUMBER_ID`, `VERIFY_TOKEN`) under the service's **Environment** tab
-2. Render gives you a permanent URL like `https://sawkobi-bot.onrender.com`
-3. Go back to **Configure Webhooks** and update the **Callback URL** to
-   `https://sawkobi-bot.onrender.com/webhook`, click **Verify and save** again.
-4. Done — ngrok/your laptop are no longer involved.
+```bash
+npm install
+npm start
+```
 
-(Want me to walk through the GitHub + Render steps in detail when you get there? Just say so.)
+A QR code will print in your terminal. Open WhatsApp on your phone →
+**Settings (or ⋮) → Linked Devices → Link a Device**, and scan it.
+
+Prefer typing a code instead of scanning? Set an environment variable
+with your number (digits only, with country code, no `+`) before starting:
+
+```bash
+# Mac/Linux
+PAIRING_PHONE_NUMBER=393331234567 npm start
+
+# Windows (PowerShell)
+$env:PAIRING_PHONE_NUMBER="393331234567"; npm start
+```
+
+You'll get a short code to enter under **Linked Devices → Link with phone
+number** instead of scanning anything.
+
+Once connected, send a message to that WhatsApp number from a different
+phone to test the auto-replies.
+
+A folder called `auth_info_baileys/` will appear — this holds your login
+session so you don't have to re-scan every time you restart. **Treat it
+like a password: anyone with this folder can access that WhatsApp
+account.** Never share it or commit it to a public GitHub repo (it's
+already excluded via `.gitignore`).
 
 ---
 
-## Customizing what it says
+## 2. Hosting it "somewhere else", for free, running all the time
 
-Open `config.js`. Change the hours, the away message text, or add FAQ
-keyword/answer pairs — every option has a comment explaining it. Restart
-(or redeploy) after saving.
+This is the honest part: nothing perfectly satisfies "always-on, free, and
+no card" at the same time for a bot that needs a constant connection.
+Something has to flex. Here are your realistic options, best fit first
+for what you asked for:
 
-## Files
+### Option A — A free container host with a keep-alive ping (recommended)
+Platforms like Render, SnapDeploy, or Replit let you deploy this for free
+with no credit card. The catch: they "sleep" your app after a period with
+no incoming web traffic, which would drop the WhatsApp connection.
 
-- `index.js` — webhook server (you shouldn't need to edit this)
-- `config.js` — **edit this** for hours and messages
-- `package.json` — dependencies
-- `.env.example` — copy to `.env` for local runs, or set these in your host's dashboard
+The fix: this bot already runs a tiny web server (the "keep-alive"
+server in `index.js`) just so an external pinger can hit it every few
+minutes and stop the host from sleeping. Pair your host with a free
+uptime monitor like **cron-job.org** or **UptimeRobot** (both free, no
+card) pointed at your app's URL, checking every 5–10 minutes.
+
+Honest limits: occasional restarts still happen (deploys, host
+maintenance), and if the host's storage isn't persistent, the
+`auth_info_baileys` folder may get wiped on restart — meaning you'll need
+to scan the QR code again. Check whether your chosen host's free tier
+offers a persistent disk/volume; if it does, point it at this project's
+folder so the session survives restarts.
+
+### Option B — A small "always-on" free bot-hosting panel
+There are smaller hosting panels (originally built for Discord/game bots)
+that advertise genuine 24/7 uptime with no card, since the workload is
+lightweight. These can work for a small Node.js process like this one.
+Two things to weigh: they're less established than the big-name hosts, and
+you'd be trusting them with that `auth_info_baileys` session folder —
+i.e., access to your WhatsApp account. Worth it for a low-stakes test
+number; I'd be more cautious for a number that matters to your business.
+
+### Option C — A genuinely-always-free cloud VM (needs a card on file)
+Oracle Cloud's "Always Free" tier gives you a real, persistent server that
+never sleeps and never expires — the most reliable free option overall.
+It does require adding a card for identity verification when you sign up,
+even though you won't be charged on the free tier. If you're open to that
+one-time step (no recurring payment), it's the sturdiest setup here.
+
+---
+
+## 3. Customizing the bot
+
+Open `config.js`. Everything you'd want to change — business hours, the
+away message, FAQ keywords and answers — is in plain text with comments
+explaining each part. Save the file and restart the bot for changes to
+apply.
+
+## 4. Files in this folder
+
+- `index.js` — the bot logic (you shouldn't need to touch this)
+- `config.js` — **edit this** to change hours, FAQs, and messages
+- `package.json` — dependency list
+- `auth_info_baileys/` — created after you link WhatsApp; your session, keep it private
