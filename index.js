@@ -31,6 +31,40 @@ app.use(express.json());
 
 app.get('/', (req, res) => res.send('WhatsApp after-hours bot is running.'));
 
+// ---- Privacy policy page (required by Meta before an app can be published) -
+// Edit the business name/contact line below if you want, then redeploy.
+app.get('/privacy-policy', (req, res) => {
+  res.set('Content-Type', 'text/html');
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Privacy Policy</title>
+  <style>
+    body { font-family: -apple-system, Arial, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #222; }
+    h1 { font-size: 1.6em; }
+    h2 { font-size: 1.2em; margin-top: 1.5em; }
+  </style>
+</head>
+<body>
+  <h1>Privacy Policy</h1>
+  <p>This WhatsApp automated assistant is used to respond to customer messages sent to our business WhatsApp number.</p>
+
+  <h2>What information we receive</h2>
+  <p>When you message our WhatsApp number, we receive your phone number and the content of the messages you send, via Meta's WhatsApp Business Platform.</p>
+
+  <h2>How we use it</h2>
+  <p>We use this information only to respond to your message - for example, to send an automatic reply outside business hours, or to answer common questions. We do not use your information for advertising, and we do not sell or share it with third parties, other than Meta/WhatsApp as the platform that delivers the messages.</p>
+
+  <h2>How long we keep it</h2>
+  <p>We retain message content only as long as needed to respond to your inquiry and for normal customer service record-keeping.</p>
+
+  <h2>Contact</h2>
+  <p>If you have questions about this policy, you can reach us through the same WhatsApp number.</p>
+</body>
+</html>`);
+});
+
 // ---- Step A: Meta calls this once, when you click "Verify and save" -------
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
