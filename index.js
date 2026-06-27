@@ -86,10 +86,16 @@ const lastAwayReplyAt = new Map(); // jid -> last time we sent the away message
 app.post('/webhook', async (req, res) => {
   res.sendStatus(200); // acknowledge immediately - Meta expects a fast response
 
+  console.log('📩 Webhook POST received at', new Date().toISOString());
+  console.log(JSON.stringify(req.body));
+
   try {
     const value = req.body?.entry?.[0]?.changes?.[0]?.value;
     const messages = value?.messages;
-    if (!messages || messages.length === 0) return; // delivery/read receipts etc. - nothing to reply to
+    if (!messages || messages.length === 0) {
+      console.log('   (no messages in this payload - likely a status/read receipt update)');
+      return;
+    }
 
     for (const msg of messages) {
       if (processedMessageIds.has(msg.id)) continue;
