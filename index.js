@@ -1,75 +1,117 @@
 // =========================================================================
-//  WhatsApp auto-reply bot
-//  - Connects to WhatsApp the same way "WhatsApp Web" does (scan a QR code,
-//    or use a pairing code instead - see README.md). No Meta Business
-//    account, no API approval, no payment method, ever.
-//  - Replies to FAQs, sends a fixed "away" message outside business hours,
-//    and an optional one-time greeting. All text is edited in config.js.
+//  WhatsApp after-hours bot - Official Cloud API (webhook) version
 //
-//  IMPORTANT: this uses an unofficial protocol. Read the README's "Risks"
-//  section before pointing this at a number you can't afford to lose.
+//  Meta calls the GET /webhook route once, to verify you own this server.
+//  After that, every incoming WhatsApp message gets POSTed to /webhook.
+//  This code checks if it's outside business hours and, if so, replies
+//  automatically using Meta's Graph API. During business hours it stays
+//  quiet (unless the message matches an FAQ keyword in config.js).
 // =========================================================================
 
-const path = require('path');
-const http = require('http');
-const pino = require('pino');
-const {
-  default: makeWASocket,
-  useMultiFileAuthState,
-  DisconnectReason,
-  Browsers,
-} = require('@whiskeysockets/baileys');
-const qrcodeTerminal = require('qrcode-terminal');
-const QRCode = require('qrcode');
-
+const express = require('express');
 const config = require('./config');
 
-// ---- Optional: connect with a pairing code instead of a QR code ---------
-// Set PAIRING_PHONE_NUMBER as an environment variable (digits only, with
-// country code, e.g. 393331234567) if you'd rather type a code into
-// WhatsApp than scan a QR. Leave it unset to use the QR code method.
-const PAIRING_PHONE_NUMBER = process.env.PAIRING_PHONE_NUMBER || null;
+const {
+  WHATSAPP_TOKEN, // access token from API Setup (temporary) or System User (permanent)
+  PHONE_NUMBER_ID, // "Phone number ID" shown on the API Setup screen
+  VERIFY_TOKEN, // any string you make up - must match what you type in the Meta dashboard
+  PORT = 3000,
+  GRAPH_API_VERSION = 'v23.0',
+} = process.env;
 
-const AUTH_FOLDER = path.join(__dirname, 'auth_info_baileys');
-const logger = pino({ level: 'silent' });
+if (!WHATSAPP_TOKEN || !PHONE_NUMBER_ID || !VERIFY_TOKEN) {
+  console.warn(
+    '⚠️  Missing WHATSAPP_TOKEN, PHONE_NUMBER_ID, or VERIFY_TOKEN environment variables. ' +
+      'The server will run, but webhook verification and sending replies will fail until these are set.'
+  );
+}
 
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const app = express();
+app.use(express.json());
 
-// ---- Tiny web server: keep-alive ping + a scannable QR code image -------
-// Some free hosts spin your app down after a period of HTTP inactivity.
-// Point an external uptime monitor (also free) at the root URL every few
-// minutes to keep the bot's process - and its WhatsApp connection - alive.
-// See README.md for recommended free monitors.
-//
-// The /qr URL serves the current QR code as an actual image you can open
-// in a browser and scan with your phone's camera - no copying ASCII text
-// out of log output required.
-let latestQrPngBuffer = null;
+app.get('/', (req, res) => res.send('WhatsApp after-hours bot is running.'));
 
-const PORT = process.env.PORT || 3000;
-http
-  .createServer(async (req, res) => {
-    if (req.url === '/qr') {
-      if (!latestQrPngBuffer) {
-        res.writeHead(200, { 'Content-Type': 'text/plain' });
-        res.end(
-          'No QR code available right now. Either the bot is already linked, ' +
-            'or it has not generated one yet - check back in a few seconds after a fresh deploy.\n'
-        );
-        return;
-      }
-      res.writeHead(200, { 'Content-Type': 'image/png' });
-      res.end(latestQrPngBuffer);
-      return;
+// ---- Step A: Meta calls this once, when you click "Verify and save" -------
+app.get('/webhook', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+    console.log('✅ Webhook verified by Meta.');
+    return res.status(200).send(challenge);
+  }
+  console.log('❌ Webhook verification failed (token mismatch).');
+  return res.sendStatus(403);
+});
+
+// ---- Step B: Meta POSTs every incoming message/status update here ---------
+const processedMessageIds = new Set(); // avoid double-replying if Meta resends an event
+const lastAwayReplyAt = new Map(); // jid -> last time we sent the away message
+
+app.post('/webhook', async (req, res) => {
+  res.sendStatus(200); // acknowledge immediately - Meta expects a fast response
+
+  try {
+    const value = req.body?.entry?.[0]?.changes?.[0]?.value;
+    const messages = value?.messages;
+    if (!messages || messages.length === 0) return; // delivery/read receipts etc. - nothing to reply to
+
+    for (const msg of messages) {
+      if (processedMessageIds.has(msg.id)) continue;
+      processedMessageIds.add(msg.id);
+      await handleMessage(msg);
     }
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('WhatsApp bot is running. Open /qr to scan the linking code.\n');
-  })
-  .listen(PORT, () => {
-    console.log(`Keep-alive server listening on port ${PORT}`);
-  });
+  } catch (err) {
+    console.error('Error processing webhook payload:', err);
+  }
+});
 
-// ---- Business-hours helper -----------------------------------------------
+async function handleMessage(msg) {
+  const from = msg.from; // sender's WhatsApp number, e.g. "393331234567"
+  const text = msg.text?.body || '';
+  if (!from) return;
+
+  // FAQ answers always fire, any time of day, if configured.
+  const faqAnswer = matchFaq(text);
+  if (faqAnswer) {
+    await sendMessage(from, faqAnswer);
+    return;
+  }
+
+  if (isWeekend()) {
+    if (!canSendAway(from)) return;
+    await sendMessage(from, config.weekendMessage);
+    return;
+  }
+
+  if (isWithinBusinessHours()) {
+    return; // inside business hours - let a human reply, bot stays quiet
+  }
+
+  if (!canSendAway(from)) return; // already sent the away message recently to this person
+
+  await sendMessage(from, config.awayMessage);
+}
+
+function matchFaq(text) {
+  const lower = text.toLowerCase();
+  for (const entry of config.faq || []) {
+    if (entry.keywords.some((k) => lower.includes(k.toLowerCase()))) {
+      return entry.reply;
+    }
+  }
+  return null;
+}
+
+function canSendAway(jid) {
+  const now = Date.now();
+  const last = lastAwayReplyAt.get(jid);
+  if (last && now - last < config.cooldownMinutes * 60 * 1000) return false;
+  lastAwayReplyAt.set(jid, now);
+  return true;
+}
+
 function getLocalTimeInfo(timeZone) {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone,
@@ -96,197 +138,31 @@ function isWeekend() {
   return (config.weekendDays || []).includes(weekday);
 }
 
-// ---- FAQ matching ----------------------------------------------------------
-function matchFaq(text) {
-  const lower = text.toLowerCase();
-  for (const entry of config.faq) {
-    if (entry.keywords.some((k) => lower.includes(k.toLowerCase()))) {
-      return entry.reply;
-    }
-  }
-  return null;
-}
-
-// ---- Per-contact cooldowns (in-memory; resets if the bot restarts) -------
-const lastSent = new Map(); // key: `${jid}:${kind}` -> timestamp (ms)
-
-function canSend(jid, kind, cooldownMinutes) {
-  const key = `${jid}:${kind}`;
-  const now = Date.now();
-  const last = lastSent.get(key);
-  if (last && now - last < cooldownMinutes * 60 * 1000) {
-    return false;
-  }
-  lastSent.set(key, now);
-  return true;
-}
-
-// ---- Extract plain text from any common message type ----------------------
-function extractText(message) {
-  if (!message) return '';
-  return (
-    message.conversation ||
-    message.extendedTextMessage?.text ||
-    message.imageMessage?.caption ||
-    message.videoMessage?.caption ||
-    message.buttonsResponseMessage?.selectedButtonId ||
-    message.listResponseMessage?.singleSelectReply?.selectedRowId ||
-    ''
-  );
-}
-
-// ---- Handle one incoming message ------------------------------------------
-async function handleMessage(sock, msg) {
-  if (!msg.message) return; // reactions, protocol messages, etc. - nothing to reply to
-  if (msg.key.fromMe) return; // ignore messages we sent ourselves
-  const jid = msg.key.remoteJid;
-  if (!jid) return;
-  if (jid === 'status@broadcast') return; // ignore status updates
-  if (config.ignoreGroups && jid.endsWith('@g.us')) return; // ignore groups
-
-  const text = extractText(msg.message);
-  if (!text) return; // media with no caption, etc. - skip for this simple bot
-
-  const greetingText =
-    config.greetingMessage && canSend(jid, 'greeting', config.greetingCooldownMinutes)
-      ? config.greetingMessage
-      : null;
-
-  const faqAnswer = matchFaq(text);
-  let replyText = null;
-  if (faqAnswer) {
-    replyText = faqAnswer; // FAQ answers are always sent, no cooldown
-  } else if (canSend(jid, 'fallback', config.cooldownMinutes)) {
-    if (isWeekend()) {
-      replyText = config.weekendMessage;
-    } else if (isWithinBusinessHours()) {
-      replyText = config.defaultReply;
-    } else {
-      replyText = config.awayMessage;
-    }
-  }
-
-  if (!greetingText && !replyText) return; // everything is on cooldown - stay quiet
-
+async function sendMessage(to, text) {
+  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${PHONE_NUMBER_ID}/messages`;
   try {
-    await sock.sendPresenceUpdate('composing', jid);
-
-    if (greetingText) {
-      await delay(900 + Math.random() * 900);
-      await sock.sendMessage(jid, { text: greetingText });
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to,
+        type: 'text',
+        text: { body: text },
+      }),
+    });
+    if (!res.ok) {
+      const errBody = await res.text();
+      console.error('Send message failed:', res.status, errBody);
+    } else {
+      console.log(`Sent reply to ${to}`);
     }
-
-    if (replyText) {
-      await delay(900 + Math.random() * 1200);
-      await sock.sendPresenceUpdate('composing', jid);
-      await delay(700 + Math.random() * 900);
-      await sock.sendMessage(jid, { text: replyText });
-    }
-
-    await sock.sendPresenceUpdate('paused', jid);
   } catch (err) {
-    console.error('Failed to send reply:', err?.message || err);
+    console.error('Network error sending message:', err?.message || err);
   }
 }
 
-// ---- Connect to WhatsApp ----------------------------------------------------
-let hasEverFullyConnected = false; // only set true by a real 'open' event - not by creds.registered
-let pairingCodeRequested = false; // only request a pairing code ONCE per process - never auto-retry it
-
-async function startBot() {
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
-
-  const sock = makeWASocket({
-    auth: state,
-    logger,
-    browser: Browsers.ubuntu('Chrome'),
-  });
-
-  sock.ev.on('creds.update', saveCreds);
-
-  sock.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect, qr } = update;
-
-    if (qr && !PAIRING_PHONE_NUMBER) {
-      try {
-        latestQrPngBuffer = await QRCode.toBuffer(qr, { type: 'png', width: 400, margin: 2 });
-        console.log(
-          '\n📷 New QR code ready - open this URL in any browser and scan it with your phone camera:\n' +
-            `   https://${process.env.RENDER_EXTERNAL_HOSTNAME || 'YOUR-RENDER-URL'}/qr\n`
-        );
-      } catch (err) {
-        console.error('Could not generate QR image:', err?.message || err);
-      }
-      // Also print the ASCII version, useful for local/terminal runs.
-      qrcodeTerminal.generate(qr, { small: true });
-    }
-
-    if (
-      PAIRING_PHONE_NUMBER &&
-      connection === 'connecting' &&
-      !sock.authState.creds.registered &&
-      !pairingCodeRequested
-    ) {
-      pairingCodeRequested = true; // never ask twice in the same process, even on reconnect
-      try {
-        await delay(1500);
-        const code = await sock.requestPairingCode(PAIRING_PHONE_NUMBER);
-        console.log(
-          `\nOpen WhatsApp > Linked Devices > Link with phone number, and enter this code: ${code}\n`
-        );
-      } catch (err) {
-        console.error('Could not request a pairing code:', err?.message || err);
-      }
-    }
-
-    if (connection === 'open') {
-      hasEverFullyConnected = true;
-      latestQrPngBuffer = null; // no longer needed once linked
-      console.log('✅ Connected to WhatsApp. The bot is now live.');
-    }
-
-    if (connection === 'close') {
-      const statusCode = lastDisconnect?.error?.output?.statusCode;
-      const errorMessage = lastDisconnect?.error?.message;
-      const errorName = lastDisconnect?.error?.name;
-      const loggedOut = statusCode === DisconnectReason.loggedOut;
-
-      console.log(
-        `🔎 Disconnect detail — statusCode: ${statusCode ?? 'none'}, ` +
-          `errorName: ${errorName ?? 'none'}, errorMessage: ${errorMessage ?? 'none'}`
-      );
-
-      if (loggedOut) {
-        console.log(
-          '❌ Logged out from WhatsApp. Redeploy (or restart) the service for a clean session and a fresh pairing code.'
-        );
-      } else if (!hasEverFullyConnected) {
-        // Never actually finished linking in THIS process. Do not auto-retry -
-        // requesting a second pairing code before the first is used is what
-        // gets the session flagged. A fresh redeploy is required for a new code.
-        console.log(
-          '⚠️  Disconnected before linking finished. Redeploy (or restart) the service for a fresh pairing code, ' +
-            'and have WhatsApp open and ready before you do.'
-        );
-      } else {
-        // Was already linked and working before - this is a normal drop, safe to reconnect.
-        console.log('⚠️  Connection closed, reconnecting in 3 seconds...');
-        setTimeout(startBot, 3000);
-      }
-    }
-  });
-
-  sock.ev.on('messages.upsert', ({ messages, type }) => {
-    if (type !== 'notify') return;
-    for (const msg of messages) {
-      handleMessage(sock, msg).catch((err) =>
-        console.error('Error handling message:', err?.message || err)
-      );
-    }
-  });
-}
-
-startBot().catch((err) => {
-  console.error('Fatal error starting bot:', err);
-  process.exit(1);
-});
+app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));

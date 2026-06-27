@@ -1,18 +1,14 @@
 {
-  "name": "whatsapp-auto-reply-bot",
+  "name": "whatsapp-afterhours-bot",
   "version": "1.0.0",
   "private": true,
-  "description": "Simple WhatsApp auto-reply bot (FAQs, business hours, away message) using Baileys - free, no official API needed.",
+  "description": "Official WhatsApp Cloud API webhook bot - replies to clients outside business hours.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@hapi/boom": "^10.0.1",
-    "@whiskeysockets/baileys": "^6.7.23",
-    "pino": "^9.6.0",
-    "qrcode": "^1.5.4",
-    "qrcode-terminal": "^0.12.0"
+    "express": "^4.21.2"
   },
   "engines": {
     "node": ">=18"
