@@ -247,7 +247,14 @@ async function startBot() {
 
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const errorMessage = lastDisconnect?.error?.message;
+      const errorName = lastDisconnect?.error?.name;
       const loggedOut = statusCode === DisconnectReason.loggedOut;
+
+      console.log(
+        `🔎 Disconnect detail — statusCode: ${statusCode ?? 'none'}, ` +
+          `errorName: ${errorName ?? 'none'}, errorMessage: ${errorMessage ?? 'none'}`
+      );
 
       if (loggedOut) {
         console.log(
