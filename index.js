@@ -20,6 +20,7 @@ const {
   Browsers,
 } = require('@whiskeysockets/baileys');
 const qrcodeTerminal = require('qrcode-terminal');
+const QRCode = require('qrcode');
 
 const config = require('./config');
 
@@ -34,16 +35,35 @@ const logger = pino({ level: 'silent' });
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// ---- Tiny keep-alive web server ------------------------------------------
+// ---- Tiny web server: keep-alive ping + a scannable QR code image -------
 // Some free hosts spin your app down after a period of HTTP inactivity.
-// Point an external uptime monitor (also free) at this URL every few
+// Point an external uptime monitor (also free) at the root URL every few
 // minutes to keep the bot's process - and its WhatsApp connection - alive.
 // See README.md for recommended free monitors.
+//
+// The /qr URL serves the current QR code as an actual image you can open
+// in a browser and scan with your phone's camera - no copying ASCII text
+// out of log output required.
+let latestQrPngBuffer = null;
+
 const PORT = process.env.PORT || 3000;
 http
-  .createServer((req, res) => {
+  .createServer(async (req, res) => {
+    if (req.url === '/qr') {
+      if (!latestQrPngBuffer) {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end(
+          'No QR code available right now. Either the bot is already linked, ' +
+            'or it has not generated one yet - check back in a few seconds after a fresh deploy.\n'
+        );
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'image/png' });
+      res.end(latestQrPngBuffer);
+      return;
+    }
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('WhatsApp bot is running.\n');
+    res.end('WhatsApp bot is running. Open /qr to scan the linking code.\n');
   })
   .listen(PORT, () => {
     console.log(`Keep-alive server listening on port ${PORT}`);
@@ -188,7 +208,16 @@ async function startBot() {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr && !PAIRING_PHONE_NUMBER) {
-      console.log('\nScan this QR code with WhatsApp > Linked Devices > Link a Device:\n');
+      try {
+        latestQrPngBuffer = await QRCode.toBuffer(qr, { type: 'png', width: 400, margin: 2 });
+        console.log(
+          '\n📷 New QR code ready - open this URL in any browser and scan it with your phone camera:\n' +
+            `   https://${process.env.RENDER_EXTERNAL_HOSTNAME || 'YOUR-RENDER-URL'}/qr\n`
+        );
+      } catch (err) {
+        console.error('Could not generate QR image:', err?.message || err);
+      }
+      // Also print the ASCII version, useful for local/terminal runs.
       qrcodeTerminal.generate(qr, { small: true });
     }
 
@@ -212,6 +241,7 @@ async function startBot() {
 
     if (connection === 'open') {
       hasEverFullyConnected = true;
+      latestQrPngBuffer = null; // no longer needed once linked
       console.log('✅ Connected to WhatsApp. The bot is now live.');
     }
 
